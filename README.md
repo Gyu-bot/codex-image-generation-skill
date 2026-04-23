@@ -5,7 +5,7 @@ Hermes-friendly image generation skill that uses:
 - **Codex OAuth / Codex auth session**
 - `codex responses`
 - OpenAI hosted `image_generation` tool
-- an `image-creator`-style prompt policy layer
+- a fidelity-first prompt policy layer
 
 This repository keeps the skill in a git-manageable shape while letting Hermes use it directly from the skill directory.
 
@@ -51,6 +51,15 @@ That top-level model is the orchestrator. The actual image rendering happens in 
 - `scripts/gen_image.py` — main executable helper script
 - `README.md` — repository-level documentation for git-managed use
 
+## References
+
+This repository was implemented with the following upstream projects as references:
+
+- `ima2-gen` — https://github.com/lidge-jun/ima2-gen
+- `codex-skills` — https://github.com/smturtle2/codex-skills
+
+The implementation here is adapted for a Hermes-usable, git-managed skill layout.
+
 ---
 
 ## Requirements
@@ -73,7 +82,7 @@ If the CLI unexpectedly reports API key mode, check whether `OPENAI_API_KEY` in 
 
 This skill combines three layers:
 
-### 1) `image-creator`-style fidelity layer
+### 1) Fidelity-first prompt layer
 
 Default behavior is fidelity-first:
 
@@ -262,7 +271,7 @@ Use this when:
 - exact text matters
 - layout / wording / exclusions matter
 - you want minimal prompt drift
-- you want behavior closest to `image-creator`
+- you want fidelity-first behavior with minimal prompt drift
 
 #### `enhanced`
 Optional intervention mode.
@@ -334,7 +343,7 @@ Typical influence:
 - typography precision emphasis
 - concise negative-prompt-style avoidance clauses for artifacts, blur, deformation, watermarking, duplicate elements, and poor text rendering
 
-This is the closest profile to the stronger prompt intervention style seen in `ima2-gen`.
+This is the strongest prompt-intervention profile in this skill.
 
 ---
 

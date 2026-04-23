@@ -6,13 +6,13 @@ author: 솜
 license: MIT
 metadata:
   hermes:
-    tags: [codex, image-generation, oauth, creative, responses-api, image-creator]
+    tags: [codex, image-generation, oauth, creative, responses-api]
     related_skills: [codex, hermes-agent]
 ---
 
 # Codex Image Creator
 
-Use this skill when the user wants **GPT/Codex-backed image generation** while keeping **image-creator-style prompt control** inside a Hermes-usable workflow.
+Use this skill when the user wants **GPT/Codex-backed image generation** with **fidelity-first prompt control** inside a Hermes-usable workflow.
 
 This skill does **not** require Codex skill runtime execution. Instead, it uses:
 
@@ -33,19 +33,19 @@ while the **policy layer** stays under this skill's control.
 
 This skill combines three ideas:
 
-1. **`image-creator` policy layer**
+1. **Fidelity-first policy layer**
    - preserve user intent
    - preserve exact rendered text
    - avoid unwanted prompt drift
    - split execution instructions from creative content
    - default to no overwrite
 
-2. **Existing thin-wrapper simplicity**
+2. **Thin-wrapper simplicity**
    - one clear entry script
    - easy to debug
    - git-friendly local files
 
-3. **Selective `ima2-gen` style overlays**
+3. **Optional enhancement overlays**
    - optional developer-prompt strengthening
    - optional research / `web_search`
    - optional prompt enhancement profiles
@@ -82,7 +82,7 @@ Per current OpenAI docs, the **top-level model** is the text-capable orchestrato
 
 ### Default: fidelity-first
 
-The default behavior is intentionally close to `image-creator`:
+The default behavior is:
 
 - rewrite the request into model-friendly image prompt language
 - preserve user meaning, explicit constraints, and omissions
