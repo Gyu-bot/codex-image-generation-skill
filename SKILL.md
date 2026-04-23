@@ -98,7 +98,7 @@ If the user wants stronger intervention, the script can enable optional overlays
 - optional `web_search`
 - photorealistic default behavior
 - cinematic enhancement
-- aggressive quality / negative-prompt style boosting
+- aggressive quality / negative-prompt style boosting with the same stronger wrapper behavior used in the referenced `ima2-gen` project
 
 This is **off by default**.
 
@@ -112,7 +112,7 @@ This is **off by default**.
 - `--enhancement-profile` — `none|safe-polish|cinematic|photoreal|aggressive` (default `none`)
 - `--research` — `off|auto` (default `off`)
 - `--size` — output size (default `1024x1024`)
-- `--quality` — `auto|low|medium|high` (default `high`)
+- `--quality` — `auto|low|medium|high` (default `medium`)
 - `--background` — `auto|opaque|transparent`
 - `--format` — `png|jpeg|webp` (default `png`)
 - `--compression` — compression value for jpeg/webp
@@ -182,7 +182,6 @@ python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
   "A dramatic sci-fi knight on a ruined moon" \
   --prompt-mode enhanced \
   --enhancement-profile aggressive \
-  --research auto \
   --quality high \
   --output ./moon-knight.png
 ```
@@ -268,6 +267,53 @@ Run again with:
 
 and inspect the raw event stream.
 
+Note: if the request is rejected very early by the hosted safety system, the run may fail before any `image_generation_call` event or events file is produced.
+
+### Safety rejection on sexualized prompts
+
+OpenAI's hosted `image_generation` path can reject prompts that sexualize a young-looking adult, emphasize body lines, or combine bikini/swimwear wording with appearance-focused posing. In that case the script may return an error like:
+
+```text
+safety_violations=[sexual]
+```
+
+This is an upstream policy refusal, not necessarily a bug in the skill, the prompt mode, or Codex OAuth.
+
+### Generic processing errors on borderline prompts
+
+Some borderline prompts do **not** come back with an explicit safety label. Instead, `codex responses` may fail early with a generic upstream error such as:
+
+```text
+retryable error: An error occurred while processing your request.
+```
+
+Observed behavior:
+
+- the same prompt can succeed on one run and fail on another
+- failures may happen before any `image_generation_call` result is emitted
+- when that happens, the script may not save an `--events` file even if one was requested
+- `response.rate_limits.credits.has_credits=false` can appear even on successful runs, so that field alone is **not** enough to diagnose the failure as a credit issue
+
+Practical interpretation:
+
+- if a request fails this way but similar requests sometimes succeed, suspect an upstream transient or moderation/admission-stage failure rather than a local script bug
+- this is more likely with sexualized swimwear or body-emphasis prompts that sit near policy boundaries
+- retrying can change the outcome, but it does **not** guarantee stable repeatability
+
+### Transparent background fails
+
+In `--prompt-mode enhanced --enhancement-profile aggressive`, borderline sexualized prompts may behave inconsistently across repeated runs:
+
+- one run may succeed and save an image
+- the next run may fail with a generic retryable processing error
+- the failure may appear without an explicit `safety_violations=[sexual]` surface
+
+Treat this as an upstream hosted-tool instability / policy edge case rather than proof that the local wrapper is broken.
+
+### Multiple images
+
+The current script interface does not expose a dedicated `--count` / `--num-images` flag. If the user wants two or more candidates, run the script multiple times with distinct output paths.
+
 ### Transparent background fails
 
 Some GPT Image paths do not support transparent backgrounds. Retry with:
@@ -290,25 +336,128 @@ is enabled.
 
 When a user wants GPT/Codex-backed image generation, use this skill's script before Hermes' internal image tool.
 
-### Use fidelity mode when
+The agent should choose options **autonomously by default** unless the user explicitly asks for a specific mode, profile, quality, size, format, or research behavior.
+
+## Agent option-selection policy
+
+### Baseline default
+
+If the user does not specify otherwise, start from this baseline:
+
+- `--prompt-mode enhanced`
+- `--enhancement-profile safe-polish`
+- `--research off`
+- `--quality medium`
+- `--size 1024x1024`
+- `--format png`
+- `--background auto`
+- `--action auto`
+
+Reasoning: for ordinary lightweight image generation, a small amount of prompt enhancement usually produces better results than strict fidelity-first handling.
+
+### Choose `--prompt-mode fidelity` when
 
 - exact text matters
-- the user cares about prompt faithfulness
+- prompt faithfulness matters more than extra polish
 - layout / composition / brand constraints matter
+- the user already wrote a detailed prompt
+- the request includes detailed scene direction, instruction-heavy composition notes, or precise do/don't constraints
 - prompt drift would be harmful
 
-### Use enhanced mode when
+### Choose `--prompt-mode enhanced` when
 
-- the user explicitly wants stronger prompt intervention
+- the user did not provide a highly constrained prompt
+- the prompt is short, casual, or underspecified
+- the user wants the model to beautify, interpret, or flesh out the scene
 - poster / ad / concept-art / cinematic polish is desired
-- photoreal defaults or negative-prompt style boosting should be applied
-- optional research-backed real-world grounding is useful
+- photoreal defaults or stronger rendering bias are desirable
+- the user asks for a more stylized, dramatic, premium, or production-like result
 
-## Recommended default behavior for me
+For normal casual image generation, prefer `enhanced` over `fidelity`.
 
-If the user does not specify otherwise:
+### Choose enhancement profiles like this
 
-- start with `--prompt-mode fidelity`
-- keep `--research off`
-- keep `--enhancement-profile none`
-- only enable enhancement overlays when the user explicitly wants stronger intervention
+#### `none`
+
+Use when:
+
+- fidelity is the goal
+- the user already provided enough detail
+- you do not want extra aesthetic drift
+
+#### `safe-polish`
+
+Use when:
+
+- the user wants a small visual upgrade without major reinterpretation
+- clarity, lighting, and finish should improve a little
+- you want the lightest enhancement overlay
+
+#### `cinematic`
+
+Use when:
+
+- the user wants mood, atmosphere, dramatic lighting, or film-like composition
+- concept art, posters, key art, and scene illustration are the goal
+- you want enhancement, but not the strongest possible intervention
+
+#### `photoreal`
+
+Use when:
+
+- the user wants realism or photo-like rendering
+- the prompt is visual but style-unspecified, and realism is the safest helpful assumption
+- product shots, interiors, portraits, travel imagery, architecture, or editorial-looking results are desired
+
+#### `aggressive`
+
+Use only when:
+
+- the user explicitly wants the strongest possible prompt enhancement
+- maximal polish is preferred over strict prompt fidelity
+- stronger quality-boosting and negative-prompt-style bias are acceptable
+- occasional upstream instability is acceptable
+
+Do **not** choose `aggressive` silently for normal requests. It is an opt-in stronger mode.
+
+### Choose `--research auto` when
+
+- the subject depends on current real-world facts
+- the prompt references a real person, real brand, real location, real product, or current appearance
+- accurate product details, architecture, landmarks, uniforms, logos, or public-figure appearance matter
+- better grounding is worth extra tool use
+
+Even though the flag default is `off`, the agent should actively switch to `auto` whenever real-world grounding is likely to improve the result in a meaningful way.
+
+Keep `--research off` when:
+
+- the request is fictional, self-contained, or purely stylistic
+- web lookup would not materially improve the image prompt
+- the user is clearly asking for an imagined or transformed version rather than factual grounding
+
+### Choose quality like this
+
+- `medium` — default for normal use
+- `high` — when the user explicitly prioritizes best quality over speed/cost, or the image is important enough to justify it
+- `low` — only for intentionally cheap/fast draft generation
+- `auto` — only when you intentionally want the hosted tool to decide
+
+### Choose image count like this
+
+The script has no dedicated multi-image flag right now. If the user asks for multiple candidates:
+
+- run the script multiple times
+- use distinct output paths
+- report which attempts succeeded or failed
+
+### Choose output/action options like this
+
+- use `--format png` by default
+- use `--background transparent` only when the user clearly wants cutout / compositing behavior
+- use `--action edit` with `--edit-image` when modifying an existing image
+- use `--reference-image` for guidance/reference, not direct editing
+
+### Ask vs choose
+
+The agent should choose on its own when the user's intent is clear.
+Only ask when the decision materially changes the result and there is no strong default signal from the user's request.

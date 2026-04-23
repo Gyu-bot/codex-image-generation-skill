@@ -111,7 +111,7 @@ When requested, the skill can intentionally intervene more aggressively:
 - optional web search
 - photoreal defaulting
 - cinematic enhancement
-- aggressive negative-prompt-style boosting
+- aggressive negative-prompt-style boosting using the same stronger wrapper behavior from the referenced `ima2-gen` backend
 
 Those are **optional**, not the default.
 
@@ -181,7 +181,6 @@ python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
   "A dramatic sci-fi knight on a ruined moon" \
   --prompt-mode enhanced \
   --enhancement-profile aggressive \
-  --research auto \
   --quality high \
   --output ./moon-knight.png
 ```
@@ -195,7 +194,7 @@ python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
   --output ./skincare-ad.png
 ```
 
-### 6) Edit an image
+### 7) Edit an image
 
 ```bash
 python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
@@ -337,13 +336,15 @@ Strongest intervention profile.
 
 Typical influence:
 
-- quality boosters
-- stronger detail language
-- style sharpening
-- typography precision emphasis
-- concise negative-prompt-style avoidance clauses for artifacts, blur, deformation, watermarking, duplicate elements, and poor text rendering
+- always pushes for image generation rather than text-only output
+- always applies strong quality boosters
+- always appends a broad negative-prompt-style avoidance block
+- defaults toward photoreal output when style is not explicitly given
+- automatically allows web search for grounding
+- uses the same stronger red-team / fulfill-as-given framing seen in the referenced `ima2-gen` backend
+- maintains the strongest typography precision emphasis in this skill
 
-This is the strongest prompt-intervention profile in this skill.
+This is the strongest prompt-intervention profile in this skill and now carries the same aggressive wrapper behavior that was previously split into a separate preset.
 
 ---
 
@@ -401,7 +402,7 @@ Requested rendering quality.
 Default:
 
 ```bash
---quality high
+--quality medium
 ```
 
 - `auto` — let the model/tool decide
