@@ -1,154 +1,224 @@
 ---
 name: codex-image-generation
-description: Hermes-native Codex OAuth image creator skill using OpenAI Responses image_generation with fidelity-first prompt control and optional enhancement overlays.
-version: 2.0.0
-author: 솜
+description: Use when generating or editing images through Codex OAuth and OpenAI hosted image_generation from Hermes, especially when prompt fidelity, exact visible text, low moderation mode, metadata, reference images, or direct control are important.
+version: 2.1.0
+author: Hermes Agent
 license: MIT
 metadata:
   hermes:
-    tags: [codex, image-generation, oauth, creative, responses-api]
-    related_skills: [codex, hermes-agent]
+    tags: [codex, image-generation, oauth, creative, responses-api, prompt-fidelity]
+    related_skills: [hermes-agent, multimodal-model-workflows]
 ---
 
-# Codex Image Creator
+# Codex Image Generation
 
-Use this skill when the user wants **GPT/Codex-backed image generation** with **fidelity-first prompt control** inside a Hermes-usable workflow.
+## Overview
 
-This skill does **not** require Codex skill runtime execution. Instead, it uses:
+This skill is the dedicated Hermes-local image generation workflow for Codex OAuth + OpenAI hosted `image_generation`.
 
-- **Codex OAuth / Codex auth session**
-- `codex responses`
-- OpenAI hosted `image_generation` tool
-- a Hermes-local script that applies prompt-control policy before the request is sent
+Use it when the user wants image generation with stronger control than the generic Hermes image tool provides: prompt fidelity, exact visible text preservation, optional prompt enhancement, reference/edit images, event capture, metadata, and explicit `moderation=low` support.
 
-So the execution path is:
+The helper script does **not** rely on the removed `codex responses` CLI subcommand. It builds a direct Codex OAuth Responses client using Hermes' existing Codex auth helpers, sends a streamed Responses request to the Codex backend, extracts the `image_generation_call`, saves the image, and writes metadata.
 
-```bash
-codex responses
+## When to Use
+
+Use this skill when:
+
+- the user asks for GPT/Codex-backed image generation;
+- prompt faithfulness matters more than generic beautification;
+- exact visible text, Korean/Japanese/Chinese script, slogans, UI copy, signs, or labels must be preserved;
+- the request needs `--moderation low` rather than the stricter default surface of simpler image tools;
+- the user provides reference images or edit targets;
+- you need raw event logs or metadata for debugging;
+- multiple candidates should be generated with consistent settings.
+
+Do **not** use this skill for:
+
+- simple throwaway image requests where Hermes' built-in `image_generate` is sufficient and no Codex/GPT-specific control is needed;
+- tasks that need manual drawing or post-processing instead of generation;
+- requests that require secrets, payments, account changes, or other side effects unrelated to image generation.
+
+## Files
+
+```text
+~/.hermes/skills/creative/codex-image-generation/
+  SKILL.md
+  README.md
+  scripts/
+    gen_image.py
+    test_gen_image.py
 ```
 
-while the **policy layer** stays under this skill's control.
+Main executable:
 
-## Core design
-
-This skill combines three ideas:
-
-1. **Fidelity-first policy layer**
-   - preserve user intent
-   - preserve exact rendered text
-   - avoid unwanted prompt drift
-   - split execution instructions from creative content
-   - default to no overwrite
-
-2. **Thin-wrapper simplicity**
-   - one clear entry script
-   - easy to debug
-   - git-friendly local files
-
-3. **Optional enhancement overlays**
-   - optional developer-prompt strengthening
-   - optional research / `web_search`
-   - optional prompt enhancement profiles
-
-## Script path
-
-This skill ships a helper script at:
-
-- `scripts/gen_image.py`
+```bash
+python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py --help
+```
 
 ## Preconditions
 
-1. `codex` CLI must be installed and on `PATH`
-2. The user should be logged in with:
-   ```bash
-   codex login status
-   ```
-3. Prefer ChatGPT / OAuth auth when the goal is Codex-backed image generation
-4. If `codex login status` unexpectedly shows API key mode, check whether `OPENAI_API_KEY` is overriding OAuth
+1. Hermes source exists at `~/.hermes/hermes-agent` so the helper can import Codex OAuth helpers.
+2. Codex/ChatGPT OAuth credentials are available to Hermes.
+3. Python dependencies used by Hermes' image provider are installed, including `openai`.
+4. For oversized reference-image compression, Pillow is useful; without Pillow, large reference images may fail validation.
 
-## Runtime model note
-
-The script sends a Responses request such as:
+Check Codex CLI state only as a sanity check:
 
 ```bash
---model gpt-5.4
+codex login status
 ```
 
-with the hosted `image_generation` tool.
+A working CLI status does not prove this helper will work, because the helper uses Hermes' Codex OAuth helpers directly. But an expired or missing Hermes OAuth token will still break generation.
 
-Per current OpenAI docs, the **top-level model** is the text-capable orchestrator, while the **actual image rendering** is performed by a GPT Image backend. So this path is compatible with the goal of using the GPT Image family even though the Responses `model` field is `gpt-5.4`.
+## Core Design
 
-## Policy model
+### 1. Role-separated prompt policy
 
-### Default: fidelity-first
+The helper separates execution policy from creative content:
 
-The default behavior is:
+- `developer` / top-level `instructions`: behavior policy, preservation rules, tool-use requirements, text-language policy, safety-intent cues.
+- `user`: the user's image prompt and any reference/edit images.
 
-- rewrite the request into model-friendly image prompt language
-- preserve user meaning, explicit constraints, and omissions
-- preserve exact rendered text
-- avoid adding unrequested style/camera/lens/negative-prompt boilerplate
-- avoid skill-layer sanitizing or softening
+The Codex backend currently requires a top-level `instructions` field, so the helper mirrors the developer policy there while keeping the developer/user split.
 
-### Optional: enhancement overlays
+### 2. Fidelity-first defaults
 
-If the user wants stronger intervention, the script can enable optional overlays:
+Script defaults are conservative:
 
-- stronger developer-prompt guidance
-- optional `web_search`
-- photorealistic default behavior
-- cinematic enhancement
-- aggressive quality / negative-prompt style boosting with the same stronger wrapper behavior used in the referenced `ima2-gen` project
+```bash
+--prompt-mode fidelity
+--enhancement-profile none
+--moderation low
+--quality medium
+--size 1024x1024
+--format png
+--background auto
+--reasoning-effort medium
+```
 
-This is **off by default**.
+This means the script tries to preserve the user's prompt rather than silently rewriting it into a generic image prompt.
 
-## Supported parameters
+### 3. Direct Codex OAuth transport
 
-- `prompt` — required text prompt
-- `--output` — output file path or directory; defaults to current directory with auto filename
-- `--overwrite` — explicitly overwrite an existing destination file
-- `--model` — mainline Responses model (default `gpt-5.4`)
-- `--prompt-mode` — `fidelity|enhanced` (default `fidelity`)
-- `--enhancement-profile` — `none|safe-polish|cinematic|photoreal|aggressive` (default `none`)
-- `--research` — `off|auto` (default `off`)
-- `--size` — output size (default `1024x1024`)
-- `--quality` — `auto|low|medium|high` (default `medium`)
-- `--background` — `auto|opaque|transparent`
-- `--format` — `png|jpeg|webp` (default `png`)
-- `--compression` — compression value for jpeg/webp
-- `--action` — `auto|generate|edit` (default `auto`)
-- `--reference-image` — reference image path; may be passed multiple times
-- `--edit-image` — edit target image path
-- `--events` — save raw `codex responses` JSONL events for debugging
-- `--metadata` — save metadata JSON to a specific path; defaults to `<saved-image>.<ext>.json`
+The helper uses:
 
-## Input images
+```text
+https://chatgpt.com/backend-api/codex
+```
 
-Input images are **not only for image-to-image editing**.
+with Hermes' existing Codex OAuth token and Cloudflare headers. This avoids the old hidden CLI passthrough path that now falls into the interactive TUI and fails with `stdin is not a terminal`.
 
-Two main roles exist:
+### 4. Metadata-first debugging
 
-### Edit target
+Every successful run writes metadata next to the image unless `--metadata` is explicitly set. Metadata includes:
 
-Use `--edit-image` when the existing image itself should be modified.
+- saved path;
+- original prompt;
+- orchestrator model and image model;
+- prompt mode and enhancement profile;
+- moderation, quality, size, background, format;
+- reference/edit image diagnostics;
+- revised prompt when returned;
+- usage, event counts, partial image count, and web search count.
 
-Examples:
-- change the background
-- replace text in the image
-- preserve layout but alter details
+## CLI Options
 
-### Reference image
+Important options:
 
-Use `--reference-image` when the image should guide a new generation rather than be directly edited.
+- `prompt` — required image or edit instruction.
+- `--output` / `-o` — output file path or directory.
+- `--overwrite` — overwrite instead of auto-versioning.
+- `--model` — `gpt-5.5`, `gpt-5.4`, or `gpt-5.4-mini`; default `gpt-5.4`.
+- `--reasoning-effort` — `none`, `low`, `medium`, `high`, `xhigh`.
+- `--prompt-mode` — `direct`, `fidelity`, or `enhanced`.
+- `--enhancement-profile` — `none`, `safe-polish`, `cinematic`, `photoreal`, or `aggressive`.
+- `--research` — `off` or `auto`; enables `web_search` before image generation when useful.
+- `--size` — image size, e.g. `1024x1024`.
+- `--quality` — `auto`, `low`, `medium`, `high`.
+- `--background` — `auto`, `opaque`, `transparent`.
+- `--moderation` — `auto` or `low`; default `low`.
+- `--format` — `png`, `jpeg`, or `webp`.
+- `--compression` — compression for JPEG/WebP.
+- `--action` — `auto`, `generate`, or `edit`.
+- `--reference-image` — may be passed multiple times, max 5.
+- `--edit-image` — primary image to edit.
+- `--count` — number of candidates, 1-8.
+- `--events` — save raw Responses events as JSONL.
+- `--metadata` — custom metadata JSON path.
 
-Examples:
-- use this logo as a reference
-- use this face, outfit, or product as inspiration
-- combine the vibe of these references into a new image
+## Prompt Modes
 
-## Usage examples
+### `direct`
 
-### Basic fidelity-first generation
+Use when the exact user prompt should be passed as directly as possible.
+
+Good for:
+
+- already-polished prompts;
+- prompts where wrapper language has caused moderation or fidelity issues;
+- exact scene descriptions that should not be expanded;
+- debugging the transport layer.
+
+### `fidelity`
+
+Default mode. Use when the user prompt is detailed and should be preserved, but light instruction framing is acceptable.
+
+Good for:
+
+- exact text rendering;
+- layout constraints;
+- brand/product constraints;
+- detailed art direction;
+- prompts where drift would be harmful.
+
+### `enhanced`
+
+Use when the user prompt is short or casual and would benefit from visual polish. Requires `--enhancement-profile` for any non-default enhancement.
+
+Good for:
+
+- concept art;
+- posters;
+- cinematic scenes;
+- photoreal product/interior/travel imagery;
+- requests where beauty/polish matters more than strict prompt byte-level fidelity.
+
+## Enhancement Profiles
+
+- `none` — no extra enhancement.
+- `safe-polish` — restrained clarity, lighting, and detail improvements.
+- `cinematic` — stronger mood, composition, lighting, atmosphere.
+- `photoreal` — realism-oriented defaults when style is unspecified.
+- `aggressive` — strongest enhancement; use only when the user wants maximal polish and accepts more prompt intervention.
+
+Do **not** silently choose `aggressive` for normal requests.
+
+## Reference and Edit Images
+
+Use `--edit-image` when the image itself should be modified:
+
+```bash
+python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
+  "Replace the background with a rainy neon Tokyo street while keeping the subject intact" \
+  --edit-image ./portrait.png \
+  --action edit \
+  --output ./portrait-tokyo.png
+```
+
+Use `--reference-image` when the image should guide a new generation:
+
+```bash
+python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
+  "Create a luxury skincare ad using the attached bottle as the product reference" \
+  --reference-image ./bottle.png \
+  --output ./skincare-ad.png
+```
+
+The helper validates image existence, detects MIME type from magic bytes where possible, limits references to 5, and compresses overly large inputs when Pillow is available.
+
+## Usage Recipes
+
+### Fidelity-first generation
 
 ```bash
 python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
@@ -156,7 +226,7 @@ python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
   --output ./jellyfish-library.png
 ```
 
-### Fidelity mode with exact text constraints
+### Exact visible text
 
 ```bash
 python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
@@ -165,7 +235,16 @@ python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
   --output ./poster.png
 ```
 
-### Enhanced mode with photoreal default
+### Direct mode
+
+```bash
+python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
+  "Minimal red circle on a white background" \
+  --prompt-mode direct \
+  --output ./red-circle.png
+```
+
+### Enhanced photoreal
 
 ```bash
 python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
@@ -175,289 +254,97 @@ python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
   --output ./hotel-lobby.png
 ```
 
-### Enhanced mode with aggressive prompt strengthening
+### Multiple candidates
 
 ```bash
 python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
   "A dramatic sci-fi knight on a ruined moon" \
   --prompt-mode enhanced \
-  --enhancement-profile aggressive \
-  --quality high \
+  --enhancement-profile cinematic \
+  --count 3 \
   --output ./moon-knight.png
 ```
 
-### Reference-image guided generation
+This saves `moon-knight-1.png`, `moon-knight-2.png`, and `moon-knight-3.png` unless existing files force auto-versioning.
+
+## Agent Option Selection
+
+For ordinary casual image requests, use:
 
 ```bash
-python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
-  "Create a luxury skincare ad using the attached bottle as the product reference" \
-  --reference-image ./bottle.png \
-  --output ./skincare-ad.png
+--prompt-mode enhanced --enhancement-profile safe-polish --quality medium
 ```
 
-### Edit an existing image
+For detailed prompts or exact constraints, use:
 
 ```bash
-python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
-  "Replace the background with a rainy neon Tokyo street while keeping the subject intact" \
-  --edit-image ./portrait.png \
-  --action edit \
-  --output ./portrait-tokyo-edit.png
+--prompt-mode fidelity --enhancement-profile none
 ```
 
-## Output contract
+For prompts that are failing because the wrapper appears to be interfering, try:
 
-The script:
+```bash
+--prompt-mode direct
+```
 
-1. calls `codex responses`
-2. extracts the `image_generation_call` result
-3. saves the image to the requested path
-4. writes metadata JSON next to the output by default
-5. prints the saved file path
-6. prints the revised prompt when available
-
-Metadata includes:
-
-- original prompt
-- prompt mode
-- enhancement profile
-- research mode
-- revised prompt
-- usage
-- web search call count
-- input image paths
-- saved output path
-- raw event count
-
-## Revised prompt behavior
-
-OpenAI's `image_generation` tool may automatically produce a `revised_prompt`.
-This step happens inside the hosted tool path and is **not** something this skill fully disables.
-It is not a Codex-runtime-only feature; the same behavior appears when using `codex responses` as a client to the hosted tool path.
-
-What this skill controls is the **prompt policy before that step**:
-
-- what gets preserved
-- what gets excluded
-- whether enhancement overlays are allowed
-
-So the skill controls the **upper prompt layer**, while `revised_prompt` remains an observable downstream artifact.
+Use `--research auto` only when real-world visual grounding matters: real products, places, people, brands, uniforms, landmarks, or current appearances.
 
 ## Troubleshooting
 
-### `codex login status` shows API key mode
+### `stdin is not a terminal`
 
-The current Codex auth state is not using ChatGPT/OAuth. Re-login:
-
-```bash
-codex logout
-codex login
-codex login status
-```
-
-If OAuth keeps disappearing, check whether `OPENAI_API_KEY` is present in the shell environment.
-
-### `No image_generation_call result found`
-
-Run again with:
-
-```bash
---events image_events.jsonl
-```
-
-and inspect the raw event stream.
-
-Note: if the request is rejected very early by the hosted safety system, the run may fail before any `image_generation_call` event or events file is produced.
-
-### Safety rejection on sexualized prompts
-
-OpenAI's hosted `image_generation` path can reject prompts that sexualize a young-looking adult, emphasize body lines, or combine bikini/swimwear wording with appearance-focused posing. In that case the script may return an error like:
+This usually means an old implementation tried to run a removed `codex responses` CLI subcommand and accidentally entered the interactive Codex TUI. This skill's current script should not call that CLI path. Verify the script path points to:
 
 ```text
-safety_violations=[sexual]
+~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py
 ```
 
-This is an upstream policy refusal, not necessarily a bug in the skill, the prompt mode, or Codex OAuth.
+### Auth failures
 
-### Generic processing errors on borderline prompts
+Common signs:
 
-Some borderline prompts do **not** come back with an explicit safety label. Instead, `codex responses` may fail early with a generic upstream error such as:
+- `AUTH_CHATGPT_EXPIRED`
+- `AUTH_API_KEY_INVALID`
+- `No Codex/ChatGPT OAuth credentials available`
 
-```text
-retryable error: An error occurred while processing your request.
+Check Hermes/Codex auth and make sure Hermes is not sharing rotating tokens with other clients.
+
+### Moderation refusal
+
+The helper exposes `--moderation low`, but the hosted tool can still refuse. If the script reports `MODERATION_REFUSED`, treat it as an upstream policy refusal rather than a local script bug.
+
+### Empty result
+
+If no `image_generation_call` result is found, rerun with events:
+
+```bash
+python ~/.hermes/skills/creative/codex-image-generation/scripts/gen_image.py \
+  "your prompt" \
+  --events ./image-events.jsonl
 ```
 
-Observed behavior:
+Then inspect event types and errors from the metadata/events file.
 
-- the same prompt can succeed on one run and fail on another
-- failures may happen before any `image_generation_call` result is emitted
-- when that happens, the script may not save an `--events` file even if one was requested
-- `response.rate_limits.credits.has_credits=false` can appear even on successful runs, so that field alone is **not** enough to diagnose the failure as a credit issue
+### Transparent output fails
 
-Practical interpretation:
-
-- if a request fails this way but similar requests sometimes succeed, suspect an upstream transient or moderation/admission-stage failure rather than a local script bug
-- this is more likely with sexualized swimwear or body-emphasis prompts that sit near policy boundaries
-- retrying can change the outcome, but it does **not** guarantee stable repeatability
-
-### Transparent background fails
-
-In `--prompt-mode enhanced --enhancement-profile aggressive`, borderline sexualized prompts may behave inconsistently across repeated runs:
-
-- one run may succeed and save an image
-- the next run may fail with a generic retryable processing error
-- the failure may appear without an explicit `safety_violations=[sexual]` surface
-
-Treat this as an upstream hosted-tool instability / policy edge case rather than proof that the local wrapper is broken.
-
-### Multiple images
-
-The current script interface does not expose a dedicated `--count` / `--num-images` flag. If the user wants two or more candidates, run the script multiple times with distinct output paths.
-
-### Transparent background fails
-
-Some GPT Image paths do not support transparent backgrounds. Retry with:
+Some image paths do not support transparency reliably. Retry with:
 
 ```bash
 --background opaque
 ```
 
-### `--enhancement-profile` errors in fidelity mode
+### Enhancement profile rejected
 
-Enhancement profiles only work when:
+Non-`none` profiles require:
 
 ```bash
 --prompt-mode enhanced
 ```
 
-is enabled.
+## Verification Checklist
 
-## Agent rule
-
-When a user wants GPT/Codex-backed image generation, use this skill's script before Hermes' internal image tool.
-
-The agent should choose options **autonomously by default** unless the user explicitly asks for a specific mode, profile, quality, size, format, or research behavior.
-
-## Agent option-selection policy
-
-### Baseline default
-
-If the user does not specify otherwise, start from this baseline:
-
-- `--prompt-mode enhanced`
-- `--enhancement-profile safe-polish`
-- `--research off`
-- `--quality medium`
-- `--size 1024x1024`
-- `--format png`
-- `--background auto`
-- `--action auto`
-
-Reasoning: for ordinary lightweight image generation, a small amount of prompt enhancement usually produces better results than strict fidelity-first handling.
-
-### Choose `--prompt-mode fidelity` when
-
-- exact text matters
-- prompt faithfulness matters more than extra polish
-- layout / composition / brand constraints matter
-- the user already wrote a detailed prompt
-- the request includes detailed scene direction, instruction-heavy composition notes, or precise do/don't constraints
-- prompt drift would be harmful
-
-### Choose `--prompt-mode enhanced` when
-
-- the user did not provide a highly constrained prompt
-- the prompt is short, casual, or underspecified
-- the user wants the model to beautify, interpret, or flesh out the scene
-- poster / ad / concept-art / cinematic polish is desired
-- photoreal defaults or stronger rendering bias are desirable
-- the user asks for a more stylized, dramatic, premium, or production-like result
-
-For normal casual image generation, prefer `enhanced` over `fidelity`.
-
-### Choose enhancement profiles like this
-
-#### `none`
-
-Use when:
-
-- fidelity is the goal
-- the user already provided enough detail
-- you do not want extra aesthetic drift
-
-#### `safe-polish`
-
-Use when:
-
-- the user wants a small visual upgrade without major reinterpretation
-- clarity, lighting, and finish should improve a little
-- you want the lightest enhancement overlay
-
-#### `cinematic`
-
-Use when:
-
-- the user wants mood, atmosphere, dramatic lighting, or film-like composition
-- concept art, posters, key art, and scene illustration are the goal
-- you want enhancement, but not the strongest possible intervention
-
-#### `photoreal`
-
-Use when:
-
-- the user wants realism or photo-like rendering
-- the prompt is visual but style-unspecified, and realism is the safest helpful assumption
-- product shots, interiors, portraits, travel imagery, architecture, or editorial-looking results are desired
-
-#### `aggressive`
-
-Use only when:
-
-- the user explicitly wants the strongest possible prompt enhancement
-- maximal polish is preferred over strict prompt fidelity
-- stronger quality-boosting and negative-prompt-style bias are acceptable
-- occasional upstream instability is acceptable
-
-Do **not** choose `aggressive` silently for normal requests. It is an opt-in stronger mode.
-
-### Choose `--research auto` when
-
-- the subject depends on current real-world facts
-- the prompt references a real person, real brand, real location, real product, or current appearance
-- accurate product details, architecture, landmarks, uniforms, logos, or public-figure appearance matter
-- better grounding is worth extra tool use
-
-Even though the flag default is `off`, the agent should actively switch to `auto` whenever real-world grounding is likely to improve the result in a meaningful way.
-
-Keep `--research off` when:
-
-- the request is fictional, self-contained, or purely stylistic
-- web lookup would not materially improve the image prompt
-- the user is clearly asking for an imagined or transformed version rather than factual grounding
-
-### Choose quality like this
-
-- `medium` — default for normal use
-- `high` — when the user explicitly prioritizes best quality over speed/cost, or the image is important enough to justify it
-- `low` — only for intentionally cheap/fast draft generation
-- `auto` — only when you intentionally want the hosted tool to decide
-
-### Choose image count like this
-
-The script has no dedicated multi-image flag right now. If the user asks for multiple candidates:
-
-- run the script multiple times
-- use distinct output paths
-- report which attempts succeeded or failed
-
-### Choose output/action options like this
-
-- use `--format png` by default
-- use `--background transparent` only when the user clearly wants cutout / compositing behavior
-- use `--action edit` with `--edit-image` when modifying an existing image
-- use `--reference-image` for guidance/reference, not direct editing
-
-### Ask vs choose
-
-The agent should choose on its own when the user's intent is clear.
-Only ask when the decision materially changes the result and there is no strong default signal from the user's request.
+- [ ] `python scripts/gen_image.py --help` works.
+- [ ] `python -m pytest scripts/test_gen_image.py -q` passes.
+- [ ] `git remote -v` points to the dedicated skill repository.
+- [ ] README and SKILL.md mention the current direct Codex OAuth transport, not the removed CLI passthrough.
+- [ ] No generated images, metadata, events, `__pycache__`, or credentials are committed.

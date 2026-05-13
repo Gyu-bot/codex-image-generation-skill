@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+
+# Generated images and diagnostics
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.jsonl
+*.events
+*.events.jsonl
+*.metadata.json
+*.png.json
+*.jpg.json
+*.jpeg.json
+*.webp.json
+
+# Local env / secrets
+.env
+.env.*
+*.key
+*.pem
